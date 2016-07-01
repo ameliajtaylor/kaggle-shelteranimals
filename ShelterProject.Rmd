@@ -1,0 +1,180 @@
+---
+title: "Shelter Data - Kaggle"
+author: "Amelia Taylor"
+date: "April 9, 2016"
+output: html_document
+---
+
+Exploratory Analysis
+====================
+The data along with the prompt indicate this is a supervised learning problem.  We want to predict the outcome of an animal on departure from the shelter.  Common sense suggests that age, sex and breed have the highest impact on the outcome. 
+
+```{r}
+shelter <- read.csv("/Users/ataylor/InsightInterview/Shelter/train.csv")
+test <- read.csv("/Users/ataylor/InsightInterview/Shelter/test.csv")
+names(shelter)
+names(test) 
+str(shelter)
+```
+Interesting to note that outcome sub type is not in the test data.  Further, str(shelter)shows the structure of the data frame and we see 366 colors, 1380 breeds, which may prove to be cumbersome and not helpful in the analysis.  Also, in terms of variables that make sense for prediction (e.g.. not ID which specifically identifies an animal), the test data have AnimalType, SexuponOutcome, AgeuponOutcome, Breed, and Color.  Since we only have 5 predictors, we start our analysis using all 5 until we have evidence that we shouldn't.  
+
+Before we get going too far, we note that the test data provided do not work for us to use as test data in the development of the model.  The reason is that it does not provide the OutcomeType. So we need to divide the training data into two sets, a training set and a test set.  We need to do this randomly.  First we clean the data (discussion that follows) and before we run any models, we do this split.  
+
+This data set has all variables set up as categorical. A few preliminary plots:
+```{r}
+plot(shelter$SexuponOutcome,shelter$OutcomeType)
+plot(shelter$AgeuponOutcome, shelter$OutcomeType)
+```
+
+already suggest that we may want to aggregate these data some and clean the data in other ways.  For example, the order of the ages in the data set are making plot interpretation difficult and for sex, and it appears that neutered/spayed vs. not seems to play a much bigger role in outcome than male vs. female, but we should test for this. It also might be helpful to have the age data as a continuous variable in terms of months.  Further looking at the structure, the id, name, and date time are likely to not be useful in prediction --- although name could be. We exclude them to start and test later if see should have name in there. 
+
+This is a classification problem.  The strategies we might consider (to start, there are many others, but these are commonly used and we have to think about why we might want one or the other): logistic regression, LDA (linear discriminant analysis), QDA (quadratic discriminant analysis), KNN (k nearest neighbors), trees (particularly bagging and boosting) and support vector classifiers.  
+
+First lets create a variable Age which is numerical rather than categorical/factor.
+```{r}
+oldvalues <- levels(shelter$AgeuponOutcome)
+newvalues <- c(0, 1/30,  1, 7/30,  7/30,  12,  10, 12*10,  11, 11*12, 12*12, 13*12, 14*12, 15*12, 16*12, 17*12, 18*12, 19*12, 2/30, 2, 14/30,2*12, 20*12, 3/30, 3, 21/30, 3*12, 4/30, 4, 28/30, 12*4, 5/30, 5, 35/30, 5*12, 6/30, 6, 6*12, 7, 7*12, 8, 8*12, 9, 9*12)
+shelter$Age <- newvalues[match(shelter$AgeuponOutcome, oldvalues)] 
+test$Age <- newvalues[match(test$AgeuponOutcome, oldvalues)]
+plot(shelter$Age, shelter$OutcomeType, xlab = "Age in months", ylab = "Outcome Type")
+```
+
+Next we make a few new columns with the goal being to clean/rearrange some of the data.  For example, we aggregate the breeds with and without an order "clean-up." The order clean-up may or may not make sense.  It depends on whether or not a Labrador Retriever/Jack Russell Terrier is really different from a Jack Russell Terrier/Labrador Retriever or not.  There are repeats due to this reason.  We make colunms for both seeing these as different and not.  Where we aggregate/simplify based on the first label, we don't do the reordering thinking the first label given by the shelter is somehow the dominant one.   We make a similar change to colors because, for example, both Blue/White and White/Blue appear.  There may be good reasons for this that we may need to consider (like White/Blue may indicate a very different type of dog than White/Blue) or may be good reasons to simplify to a single color with the idea that these dogs really are approximately the same color.  
+
+```{r}
+#install.packages("dplyr")
+library(dplyr)
+
+# A function to reorder two strings based on the alphabetical order of the first three letters.  
+reorder <- function(x) {
+  if (length(x) == 1) {x} 
+  else if (length(x) == 2) {
+    first <- substr(x[1], 1, 3)
+    second <- substr(x[2], 1, 3)
+    if (first > second) {rev(x)} 
+    else {x}
+  } 
+  else {x}
+} #Note if the length of the vector is more than 2, so 2 slashes, no reorder happens.
+
+# A function to simply select the first string.  
+select.first <- function(x){
+  if (length(x) == 1) x
+  else x[1]
+}
+
+# A function that takes a list of levels where some have a /, splits them and returns a new list of levels so that the order across the / is alphabetical.  
+value.reorder <- function(l){
+  temp <- strsplit(as.character(l), "/")
+  temp <- lapply(temp, function(x) reorder(x))
+  temp <- lapply(temp, function(x) paste(x, collapse = "/"))
+  as.character(temp)
+}
+
+# A function that takes a list of levels where some have a /, splits them and returns a new list of levels consisting of only the string before the /. 
+value.select <- function(l){
+  temp <- strsplit(as.character(l), "/")
+  temp <- lapply(temp, function(x) select.first(x))
+  as.character(temp)
+}
+
+# uses match to build new columns in the dataframe as factor variables using either reorder or select.first.  Breed2 is not a great name for the reordered breed. 
+old.breed <- levels(shelter$Breed)
+new.breed <- value.reorder(levels(shelter$Breed))
+shelter$Breed2 <- new.breed[match(shelter$Breed, old.breed)] 
+shelter$Breed2 <- as.factor(shelter$Breed2)
+test$Breed2 <- new.breed[match(test$Breed, old.breed)]
+test$Breed2 <- as.factor(test$Breed2)
+
+breed.simple <- value.select(levels(shelter$Breed))
+shelter$BreedSimple <- breed.simple[match(shelter$Breed, old.breed)] 
+shelter$BreedSimple <- as.factor(shelter$BreedSimple)
+test$BreedSimple <- breed.simple[match(test$Breed, old.breed)]
+test$BreedSimple <- as.factor(test$BreedSimple)
+shelter$BreedSimple[1:10]
+shelter$Breed[1:10]
+length(unique(shelter$BreedSimple))
+
+#Now the same process for colors. First we reoder, second we choose just the, presumably, dominant color. 
+old.color <- levels(shelter$Color) 
+
+new.color <- value.reorder(levels(shelter$Color))
+shelter$Color2 <- new.color[match(shelter$Color, old.color)] 
+shelter$Color2 <- as.factor(shelter$Color2)
+test$Color2 <- new.color[match(test$Color, old.color)]
+test$Color2 <- as.factor(test$Color2)
+
+color.simple <- value.select(levels(shelter$Color))
+shelter$ColorSimple <- color.simple[match(shelter$Color, old.color)] 
+shelter$ColorSimple <- as.factor(shelter$ColorSimple)
+test$ColorSimple <- color.simple[match(test$Color, old.color)]
+test$ColorSimple <- as.factor(test$ColorSimple)
+length(unique(shelter$ColorSimple))
+test$Color[1:10]
+test$ColorSimple[1:10]
+```
+
+A little function abstraction makes it easy now to use only the first indicator of the breed or to reorder reversed breeds (and if wanted, both).  Note that this returns unique indicators of size 382 and 1149 respectively.  And it makes it easy to do with both the basic data and the test data.  We did the process for breeds above making sure we still have factor variables in the data frame and below we do the same for colors and we clean the data frames using within.  We make sure to have the same variables in the shelter frame and the test frame so work later goes as planned.  Furhter, we did the same with colors getting 52 and 277 factors respectively.  
+
+Next we clean up the dataframes to only have the variables we care about (we think) and so that they match.  For this reason, for now we remove outcome sub type, but note that we may want to investigate the role of that information further later.  
+
+```{r}
+shC <- within(shelter, rm("AnimalID", "DateTime", "Name", "OutcomeSubtype"))
+```
+
+Modeling using K Nearest Neighbors
+----------------------------------
+
+Now lets split into a training and test set. 
+```{r}
+#There appear to be missing values so we take the easy way out for now and just remove them. There are very few 288 in a data set of over 26,000 entries. 
+shC <- na.omit(shC)
+length(shC$OutcomeType)*(1/3) 
+# So 1/3 of the data is approximately 8814 and 2/3 is 17627.  
+set.seed(100)
+train <- sample(seq(26441), 17627, replace = FALSE)
+```
+Now as we proceed we can call just the train rows for training and later the -train rows for testing.  This data set is large enough for this to be a good approach.  
+
+One modeling approach would be to use LDA/QDA or trees to determine the important variables. There are several reasons not to do this now.  First, trees in R requires at most 32 factors for factor variables and even with the reductions we have more than that for two of our interesting variables.  Since only have 5 predictors, this seems less helpful.  Firther, for LDA/QDA we need to turn each of the categorical predictors into 0/1 combinations. Which we can do, but for now we start with KNN which does not require this change.  We use cross-validation to determine K.  
+
+```{r}
+#install.packages("class")
+library(class)
+x.train <- cbind(shC$AnimalType, shC$SexuponOutcome, shC$Age, shC$BreedSimple, shC$Color2)
+y.train <- cbind(shC$OutcomeType)
+train.sh <- x.train[train,]
+test.sh <- x.train[-train,]
+train.outcome<- y.train[train,]
+test.outcome <- y.train[-train,]
+
+set.seed(10)
+knn.pred <- knn(train.sh, test.sh, train.outcome, k = 2)
+t <- table(knn.pred==test.outcome) 
+t[1]/(t[1]+t[2]) # test error rate
+```
+So it looks like, with this little experiment of k = 2, chosen totally arbitrarily, and probably terrible since the data set is large, that we did not do well.  We got a test error rate of 46%.
+
+We can work on improving this is several ways.  
+
+1. This is a "validation set" approach and has been shown to possibly overestimate the true test error rate, that is if we used the full data set to train and then tested on new data we would likely get a lower rate.  We can use cross-validation to train the model rather than this method. 
+
+2. We can also do a better job of picking the (tuning parameter) k.
+
+3. We can we can use a different model. 
+
+To get started we use the built-in function knn.cv to do leave-one-out cross-validation to determine k. 
+```{r}
+cv.errors <- NULL
+for (k in 1:20) {
+  cv <- knn.cv(x.train, y.train, k)
+  t <- table(cv == y.train)
+  cv.errors[k]<-t[1]/(t[1]+t[2]) # test error rate
+}
+plot(seq(1:20), cv.errors, pch = ".", xlab = "k", ylab = "cross-validation error")
+lines(seq(1:20),cv.errors)
+cv.errors[1]
+```
+Leave one out cross validation test error seems to suggest that either around k = 7 error rate of 43.68%.  Better, but by a small amount. It seems we could do better still.  Also leave-one-out is slow.
+
+While larger cross-validation sets may help (certainly with speed) it does not seem likely to help improve the error rate.  
